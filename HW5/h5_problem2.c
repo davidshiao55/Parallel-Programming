@@ -28,19 +28,20 @@ void deQueue(Queue *q);
 
 int main()
 {
-    int global_count = 0;
-    bool read_finish[NTHREADS / 2] = {0};
+    int count = 0;
+    int counter = 0;
+    int read_finish = 0;
     Queue *q = createQueue();
     FILE *fp[NTHREADS / 2];
+    const char keyword[] = "my";
     fp[0] = fopen("file1.txt", "r");
     fp[1] = fopen("file2.txt", "r");
     fp[2] = fopen("file3.txt", "r");
     fp[3] = fopen("file4.txt", "r");
-    const char keyword[] = "me";
     omp_set_num_threads(NTHREADS);
-#pragma omp parallel
+#pragma omp parallel reduction(+ \
+                               : count)
     {
-        int count = 0;
         int id = omp_get_thread_num();
         int job = (id < NTHREADS / 2) ? PRODUCER : CONSUMER;
         if (job == PRODUCER)
@@ -50,15 +51,20 @@ int main()
                 char *line = (char *)malloc(sizeof(char) * BUFF_SIZE);
                 if (!fgets(line, BUFF_SIZE, fp[id]))
                 {
-                    read_finish[id] = true;
+#pragma omp critical
+                    read_finish++;
                     break;
                 }
-                enQueue(q, line);
+#pragma omp critical
+                {
+                    counter++;
+                    enQueue(q, line);
+                }
             }
         }
         else if (job == CONSUMER)
         {
-            while (!read_finish[id - NTHREADS / 2] || q->front)
+            while (counter > 0 || read_finish != NTHREADS / 2)
             {
                 bool qempty = false;
                 char *line;
@@ -71,28 +77,26 @@ int main()
                     else
                     {
                         line = q->front->data;
+                        counter--;
                         deQueue(q);
                     }
                 }
                 if (qempty)
                     continue;
+
                 const char d[] = " \n";
                 char *token = strtok(line, d);
                 while (token != NULL)
                 {
                     if (!strcmp(token, keyword))
-                    {
                         count++;
-                    }
                     token = strtok(NULL, d);
                 }
                 free(line);
             }
-#pragma omp critical
-            global_count += count;
         }
     }
-    printf("keyword \"%s\" : %d\n", keyword, global_count);
+    printf("keyword \"%s\" : %d\n", keyword, count);
     for (int i = 0; i < NTHREADS / 2; i++)
         fclose(fp[i]);
     return 0;
